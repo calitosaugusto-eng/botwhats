@@ -1,0 +1,210 @@
+// ===========================================
+// AUTOMATION BOT - PRISMA SCHEMA
+// ===========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+}
+
+// ===========================================
+// CLIENTES (Organizações que usam o bot)
+// ===========================================
+model Client {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  niche         String   // sindicato, oficina, clinica, etc.
+  phone         String?
+  email         String?
+  address       String?
+  logo          String?
+  isActive      Boolean  @default(true)
+  plan          String   @default("basic") // basic, pro, enterprise
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relacionamentos
+  members       Member[]
+  messages      Message[]
+  templates     Template[]
+  flows         Flow[]
+  settings      Setting[]
+  conversations Conversation[]
+}
+
+// ===========================================
+// MEMBROS (Pessoas cadastradas no sistema)
+// ===========================================
+model Member {
+  id           String   @id @default(cuid())
+  clientId     String
+  name         String
+  phone        String
+  email        String?
+  cpf          String?
+  membershipId String?  // Número de matrícula
+  category     String?  // Categoria do associado
+  status       String   @default("active") // active, inactive, pending
+  joinDate     DateTime?
+  notes        String?
+  metadata     String?  // JSON para dados extras
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  // Relacionamentos
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  
+  @@unique([clientId, phone])
+}
+
+// ===========================================
+// CONVERSAS (Histórico de conversas)
+// ===========================================
+model Conversation {
+  id           String   @id @default(cuid())
+  clientId     String
+  memberId     String?
+  phone        String
+  status       String   @default("active") // active, resolved, pending_human
+  sentiment    String?  // positive, neutral, negative
+  summary      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  // Relacionamentos
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  member       Member?      @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  messages     Message[]
+}
+
+// ===========================================
+// MENSAGENS (Mensagens individuais)
+// ===========================================
+model Message {
+  id             String   @id @default(cuid())
+  clientId       String
+  conversationId String
+  direction      String   // inbound, outbound
+  type           String   @default("text") // text, image, document, audio
+  content        String
+  mediaUrl       String?
+  status         String   @default("sent") // sent, delivered, read, failed
+  isFromBot      Boolean  @default(false)
+  metadata       String?  // JSON para dados extras
+  createdAt      DateTime @default(now())
+  
+  // Relacionamentos
+  client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+// ===========================================
+// TEMPLATES (Mensagens predefinidas)
+// ===========================================
+model Template {
+  id          String   @id @default(cuid())
+  clientId    String
+  name        String
+  category    String   // welcome, faq, reminder, promotion, etc.
+  content     String
+  variables   String?  // JSON com variáveis
+  isActive    Boolean  @default(true)
+  useCount    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relacionamentos
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  @@unique([clientId, name])
+}
+
+// ===========================================
+// FLOWS (Fluxos de conversa automatizados)
+// ===========================================
+model Flow {
+  id          String   @id @default(cuid())
+  clientId    String
+  name        String
+  trigger     String   // keyword, event, etc.
+  description String?
+  steps       String   // JSON com os passos do fluxo
+  isActive    Boolean  @default(true)
+  useCount    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relacionamentos
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+// ===========================================
+// SETTINGS (Configurações por cliente)
+// ===========================================
+model Setting {
+  id          String   @id @default(cuid())
+  clientId    String
+  key         String
+  value       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relacionamentos
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  @@unique([clientId, key])
+}
+
+// ===========================================
+// ANALYTICS (Métricas e estatísticas)
+// ===========================================
+model Analytics {
+  id          String   @id @default(cuid())
+  clientId    String
+  date        DateTime @default(now())
+  messagesIn  Int      @default(0)
+  messagesOut Int      @default(0)
+  newMembers  Int      @default(0)
+  resolved    Int      @default(0)
+  pendingHuman Int     @default(0)
+  
+  @@unique([clientId, date])
+}
+
+// ===========================================
+// AUDIT LOG (Registro de ações)
+// ===========================================
+model AuditLog {
+  id          String   @id @default(cuid())
+  clientId    String?
+  action      String
+  entity      String
+  entityId    String?
+  details     String?  // JSON
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+}
+
+// ===========================================
+// NICHE TEMPLATES (Templates pré-definidos por nicho)
+// ===========================================
+model NicheTemplate {
+  id          String   @id @default(cuid())
+  niche       String
+  name        String
+  category    String
+  content     String
+  variables   String?
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([niche, name])
+}
