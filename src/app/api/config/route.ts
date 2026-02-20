@@ -5,43 +5,87 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 
+// Garantir que o cliente existe
+async function ensureClient(clientId: string) {
+  let client = await prisma.client.findUnique({
+    where: { id: clientId }
+  })
+
+  if (!client) {
+    client = await prisma.client.create({
+      data: {
+        id: clientId,
+        name: 'Cliente Padrão',
+        slug: clientId,
+        niche: 'sindicato',
+        plan: 'basic'
+      }
+    })
+  }
+
+  return client
+}
+
 // Obter configurações
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
-    const clientId = searchParams.get('clientId')
+    const clientId = searchParams.get('clientId') || 'default'
 
-    if (!clientId) {
-      return NextResponse.json({ success: false, error: 'clientId é obrigatório' }, { status: 400 })
-    }
+    // Garantir que o cliente existe
+    const client = await ensureClient(clientId)
 
-    // Buscar cliente
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: { settings: true }
+    // Buscar settings do cliente
+    const settings = await prisma.setting.findMany({
+      where: { clientId }
     })
-
-    if (!client) {
-      return NextResponse.json({ success: false, error: 'Cliente não encontrado' }, { status: 404 })
-    }
 
     // Converter settings para objeto
-    const settings: Record<string, string> = {}
-    client.settings.forEach(s => {
-      settings[s.key] = s.value
+    const settingsObj: Record<string, string> = {}
+    settings.forEach(s => {
+      settingsObj[s.key] = s.value
     })
+
+    // Calcular estatísticas
+    const [
+      totalMembers,
+      activeConversations,
+      messagesToday
+    ] = await Promise.all([
+      prisma.member.count({ where: { clientId } }),
+      prisma.conversation.count({ where: { clientId, status: 'active' } }),
+      prisma.message.count({
+        where: {
+          clientId,
+          createdAt: {
+            gte: new Date(new Date().setHours(0, 0, 0, 0))
+          }
+        }
+      })
+    ])
 
     return NextResponse.json({ 
       success: true, 
       config: {
+        botName: settingsObj.botName || 'Assistente Virtual',
+        welcomeMessage: settingsObj.welcomeMessage || 'Olá! Como posso ajudar?',
+        businessHours: settingsObj.businessHours ? JSON.parse(settingsObj.businessHours) : { start: '08:00', end: '18:00' },
+        outsideHoursMessage: settingsObj.outsideHoursMessage || 'Estamos fora do horário de atendimento.',
+        botTone: settingsObj.botTone || 'professional',
+        niche: client.niche,
         client: {
           id: client.id,
           name: client.name,
           niche: client.niche,
           plan: client.plan,
           isActive: client.isActive
-        },
-        settings
+        }
+      },
+      stats: {
+        totalMembers,
+        activeConversations,
+        messagesToday,
+        responseRate: 95
       }
     })
   } catch (error) {
@@ -54,14 +98,32 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { clientId, settings } = body
+    const { 
+      clientId = 'default',
+      botName,
+      welcomeMessage,
+      businessHours,
+      outsideHoursMessage,
+      botTone,
+      autoReply,
+      niche
+    } = body
 
-    if (!clientId || !settings) {
-      return NextResponse.json({ success: false, error: 'clientId e settings são obrigatórios' }, { status: 400 })
-    }
+    // Garantir que o cliente existe
+    await ensureClient(clientId)
+
+    // Preparar settings para salvar
+    const settingsToSave: Record<string, string> = {}
+    
+    if (botName) settingsToSave.botName = botName
+    if (welcomeMessage) settingsToSave.welcomeMessage = welcomeMessage
+    if (businessHours) settingsToSave.businessHours = JSON.stringify(businessHours)
+    if (outsideHoursMessage) settingsToSave.outsideHoursMessage = outsideHoursMessage
+    if (botTone) settingsToSave.botTone = botTone
+    if (autoReply !== undefined) settingsToSave.autoReply = String(autoReply)
 
     // Atualizar/criar cada setting
-    for (const [key, value] of Object.entries(settings)) {
+    for (const [key, value] of Object.entries(settingsToSave)) {
       await prisma.setting.upsert({
         where: {
           clientId_key: {
@@ -69,19 +131,27 @@ export async function POST(request: NextRequest) {
             key
           }
         },
-        update: { value: String(value) },
+        update: { value },
         create: {
           clientId,
           key,
-          value: String(value)
+          value
         }
+      })
+    }
+
+    // Atualizar nicho do cliente se fornecido
+    if (niche) {
+      await prisma.client.update({
+        where: { id: clientId },
+        data: { niche }
       })
     }
 
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Erro ao atualizar configurações:', error)
-    return NextResponse.json({ success: false, error: 'Erro ao atualizar configurações' }, { status: 500 })
+    return NextResponse.json({ success: false, error: 'Erro ao atualizar configurações: ' + (error instanceof Error ? error.message : 'Erro desconhecido') }, { status: 500 })
   }
 }
 
@@ -124,61 +194,5 @@ export async function PUT(request: NextRequest) {
   } catch (error) {
     console.error('Erro ao salvar cliente:', error)
     return NextResponse.json({ success: false, error: 'Erro ao salvar cliente' }, { status: 500 })
-  }
-}
-
-// Dashboard stats
-export async function DELETE(request: NextRequest) {
-  try {
-    const searchParams = request.nextUrl.searchParams
-    const clientId = searchParams.get('clientId')
-
-    if (!clientId) {
-      return NextResponse.json({ success: false, error: 'clientId é obrigatório' }, { status: 400 })
-    }
-
-    // Calcular estatísticas
-    const [
-      totalMembers,
-      activeConversations,
-      messagesToday,
-      sentimentStats
-    ] = await Promise.all([
-      prisma.member.count({ where: { clientId } }),
-      prisma.conversation.count({ where: { clientId, status: 'active' } }),
-      prisma.message.count({
-        where: {
-          clientId,
-          createdAt: {
-            gte: new Date(new Date().setHours(0, 0, 0, 0))
-          }
-        }
-      }),
-      prisma.conversation.groupBy({
-        by: ['sentiment'],
-        where: { clientId },
-        _count: { sentiment: true }
-      })
-    ])
-
-    const sentimentDistribution = {
-      positive: sentimentStats.find(s => s.sentiment === 'positive')?._count?.sentiment || 0,
-      neutral: sentimentStats.find(s => s.sentiment === 'neutral')?._count?.sentiment || 0,
-      negative: sentimentStats.find(s => s.sentiment === 'negative')?._count?.sentiment || 0
-    }
-
-    return NextResponse.json({
-      success: true,
-      stats: {
-        totalMembers,
-        activeConversations,
-        messagesToday,
-        responseRate: 95, // Placeholder
-        sentimentDistribution
-      }
-    })
-  } catch (error) {
-    console.error('Erro ao buscar estatísticas:', error)
-    return NextResponse.json({ success: false, error: 'Erro ao buscar estatísticas' }, { status: 500 })
   }
 }

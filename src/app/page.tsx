@@ -7,14 +7,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
+import { 
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import { 
   MessageSquare, Users, Send, Settings, BarChart3, 
   Bot, Zap, Clock, TrendingUp, AlertCircle, CheckCircle,
   Smartphone, Globe, Plus, Search, MoreHorizontal,
   Phone, Mail, Calendar, FileText, Bell, ChevronRight,
-  Play, Pause, RefreshCw, Terminal, Copy, ExternalLink
+  Play, Pause, RefreshCw, Terminal, Copy, ExternalLink,
+  X, Save, Clock4, MessageCircle, Sparkles, Shield
 } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 
 // Tipos
 interface Message {
@@ -29,6 +40,7 @@ interface Member {
   id: string
   name: string
   phone: string
+  email?: string
   status: string
   category?: string
 }
@@ -76,6 +88,22 @@ export default function Dashboard() {
   // Config
   const [botName, setBotName] = useState('Assistente Virtual')
   const [welcomeMessage, setWelcomeMessage] = useState('Olá! Como posso ajudar?')
+  const [businessHours, setBusinessHours] = useState({ start: '08:00', end: '18:00' })
+  const [enableOutsideHours, setEnableOutsideHours] = useState(true)
+  const [outsideHoursMessage, setOutsideHoursMessage] = useState('Estamos fora do horário de atendimento. Deixe sua mensagem que retornamos em breve!')
+  const [botTone, setBotTone] = useState('professional')
+  const [autoReply, setAutoReply] = useState(true)
+  
+  // Modais
+  const [showAddMember, setShowAddMember] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [newMember, setNewMember] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    category: '',
+    status: 'active'
+  })
 
   // Nichos disponíveis
   const niches = [
@@ -96,6 +124,7 @@ export default function Dashboard() {
     loadStats()
     loadMembers()
     loadConversations()
+    loadConfig()
   }, [])
 
   const loadStats = async () => {
@@ -134,6 +163,19 @@ export default function Dashboard() {
     }
   }
 
+  const loadConfig = async () => {
+    try {
+      const res = await fetch(`/api/config?clientId=${clientId}`)
+      const data = await res.json()
+      if (data.success && data.config) {
+        setBotName(data.config.botName || 'Assistente Virtual')
+        setWelcomeMessage(data.config.welcomeMessage || 'Olá! Como posso ajudar?')
+      }
+    } catch (error) {
+      console.error('Erro ao carregar config:', error)
+    }
+  }
+
   // Enviar mensagem no chat de teste
   const sendTestMessage = async () => {
     if (!inputMessage.trim()) return
@@ -149,6 +191,7 @@ export default function Dashboard() {
       createdAt: new Date().toISOString()
     }
     setChatMessages(prev => [...prev, userMsg])
+    const currentMessage = inputMessage
     setInputMessage('')
 
     try {
@@ -156,7 +199,7 @@ export default function Dashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: inputMessage,
+          message: currentMessage,
           clientId,
           niche: selectedNiche
         })
@@ -173,9 +216,98 @@ export default function Dashboard() {
           createdAt: new Date().toISOString()
         }
         setChatMessages(prev => [...prev, botMsg])
+      } else {
+        // Mostrar erro
+        const errorMsg: Message = {
+          id: `error-${Date.now()}`,
+          content: `Erro: ${data.error || 'Não foi possível processar a mensagem'}`,
+          direction: 'outbound',
+          isFromBot: true,
+          createdAt: new Date().toISOString()
+        }
+        setChatMessages(prev => [...prev, errorMsg])
       }
     } catch (error) {
       console.error('Erro:', error)
+      const errorMsg: Message = {
+        id: `error-${Date.now()}`,
+        content: 'Erro de conexão. Verifique se o servidor está funcionando.',
+        direction: 'outbound',
+        isFromBot: true,
+        createdAt: new Date().toISOString()
+      }
+      setChatMessages(prev => [...prev, errorMsg])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Adicionar membro
+  const handleAddMember = async () => {
+    if (!newMember.name || !newMember.phone) {
+      alert('Nome e telefone são obrigatórios')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const res = await fetch('/api/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId,
+          ...newMember
+        })
+      })
+      
+      const data = await res.json()
+      
+      if (data.success) {
+        setMembers(prev => [...prev, data.member])
+        setNewMember({ name: '', phone: '', email: '', category: '', status: 'active' })
+        setShowAddMember(false)
+        alert('Membro adicionado com sucesso!')
+      } else {
+        alert('Erro ao adicionar membro: ' + data.error)
+      }
+    } catch (error) {
+      console.error('Erro:', error)
+      alert('Erro ao adicionar membro')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Salvar configurações
+  const handleSaveConfig = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId,
+          botName,
+          welcomeMessage,
+          businessHours,
+          outsideHoursMessage,
+          botTone,
+          autoReply,
+          niche: selectedNiche
+        })
+      })
+      
+      const data = await res.json()
+      
+      if (data.success) {
+        alert('Configurações salvas com sucesso!')
+        setShowSettings(false)
+      } else {
+        alert('Erro ao salvar: ' + data.error)
+      }
+    } catch (error) {
+      console.error('Erro:', error)
+      alert('Erro ao salvar configurações')
     } finally {
       setLoading(false)
     }
@@ -234,12 +366,284 @@ export default function Dashboard() {
               <Zap className="w-3 h-3 mr-1" />
               Sistema Ativo
             </Badge>
-            <Button variant="ghost" size="sm" className="text-slate-400">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="text-slate-400 hover:text-white"
+              onClick={() => setShowSettings(true)}
+            >
               <Settings className="w-4 h-4" />
             </Button>
           </div>
         </div>
       </header>
+
+      {/* Modal de Configurações Globais (Engrenagem) */}
+      <Dialog open={showSettings} onOpenChange={setShowSettings}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="w-5 h-5" />
+              Configurações do Sistema
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Configure o comportamento do seu bot de atendimento
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6 py-4">
+            {/* Configurações Básicas */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Bot className="w-4 h-4 text-emerald-500" />
+                Identidade do Bot
+              </h3>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-slate-300">Nome do Bot</Label>
+                  <Input
+                    value={botName}
+                    onChange={e => setBotName(e.target.value)}
+                    className="bg-slate-900 border-slate-600 mt-1"
+                    placeholder="Ex: Assistente Virtual"
+                  />
+                </div>
+                <div>
+                  <Label className="text-slate-300">Nicho de Atuação</Label>
+                  <Select value={selectedNiche} onValueChange={setSelectedNiche}>
+                    <SelectTrigger className="bg-slate-900 border-slate-600 mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-slate-800 border-slate-600">
+                      {niches.map(n => (
+                        <SelectItem key={n.id} value={n.id}>
+                          {n.icon} {n.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              <div>
+                <Label className="text-slate-300">Mensagem de Boas-vindas</Label>
+                <textarea
+                  className="w-full h-20 rounded-lg bg-slate-900 border border-slate-600 p-3 text-white resize-none mt-1"
+                  value={welcomeMessage}
+                  onChange={e => setWelcomeMessage(e.target.value)}
+                  placeholder="Primeira mensagem que o bot envia..."
+                />
+              </div>
+            </div>
+
+            {/* Horário de Funcionamento */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Clock4 className="w-4 h-4 text-blue-500" />
+                Horário de Atendimento
+              </h3>
+              
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-slate-300">Resposta Automática</Label>
+                  <p className="text-xs text-slate-500">Bot responde automaticamente a todas as mensagens</p>
+                </div>
+                <Switch checked={autoReply} onCheckedChange={setAutoReply} />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-slate-300">Início</Label>
+                  <Input
+                    type="time"
+                    value={businessHours.start}
+                    onChange={e => setBusinessHours(prev => ({ ...prev, start: e.target.value }))}
+                    className="bg-slate-900 border-slate-600 mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-slate-300">Término</Label>
+                  <Input
+                    type="time"
+                    value={businessHours.end}
+                    onChange={e => setBusinessHours(prev => ({ ...prev, end: e.target.value }))}
+                    className="bg-slate-900 border-slate-600 mt-1"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-slate-300">Atender fora do horário</Label>
+                  <p className="text-xs text-slate-500">Responder quando estiver fechado</p>
+                </div>
+                <Switch checked={enableOutsideHours} onCheckedChange={setEnableOutsideHours} />
+              </div>
+              
+              <div>
+                <Label className="text-slate-300">Mensagem fora do horário</Label>
+                <textarea
+                  className="w-full h-16 rounded-lg bg-slate-900 border border-slate-600 p-3 text-white resize-none mt-1"
+                  value={outsideHoursMessage}
+                  onChange={e => setOutsideHoursMessage(e.target.value)}
+                  disabled={!enableOutsideHours}
+                />
+              </div>
+            </div>
+
+            {/* Tom de Voz */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <MessageCircle className="w-4 h-4 text-purple-500" />
+                Tom de Comunicação
+              </h3>
+              
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'professional', label: 'Profissional', desc: 'Formal e educado' },
+                  { id: 'friendly', label: 'Amigável', desc: 'Casual e próximo' },
+                  { id: 'technical', label: 'Técnico', desc: 'Direto e preciso' }
+                ].map(tone => (
+                  <button
+                    key={tone.id}
+                    onClick={() => setBotTone(tone.id)}
+                    className={`p-3 rounded-lg border text-left transition-all ${
+                      botTone === tone.id 
+                        ? 'border-emerald-500 bg-emerald-500/10' 
+                        : 'border-slate-600 hover:border-slate-500'
+                    }`}
+                  >
+                    <p className="font-medium text-white">{tone.label}</p>
+                    <p className="text-xs text-slate-400">{tone.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <Button 
+                onClick={handleSaveConfig}
+                disabled={loading}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700"
+              >
+                {loading ? (
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4 mr-2" />
+                )}
+                Salvar Configurações
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={() => setShowSettings(false)}
+                className="border-slate-600"
+              >
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Adicionar Membro */}
+      <Dialog open={showAddMember} onOpenChange={setShowAddMember}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5" />
+              Adicionar Novo Membro
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Cadastre um novo membro no sistema
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div>
+              <Label className="text-slate-300">Nome *</Label>
+              <Input
+                value={newMember.name}
+                onChange={e => setNewMember(prev => ({ ...prev, name: e.target.value }))}
+                className="bg-slate-900 border-slate-600 mt-1"
+                placeholder="Nome completo"
+              />
+            </div>
+            
+            <div>
+              <Label className="text-slate-300">Telefone *</Label>
+              <Input
+                value={newMember.phone}
+                onChange={e => setNewMember(prev => ({ ...prev, phone: e.target.value }))}
+                className="bg-slate-900 border-slate-600 mt-1"
+                placeholder="5511999999999"
+              />
+              <p className="text-xs text-slate-500 mt-1">Formato: código país + DDD + número</p>
+            </div>
+            
+            <div>
+              <Label className="text-slate-300">Email</Label>
+              <Input
+                type="email"
+                value={newMember.email}
+                onChange={e => setNewMember(prev => ({ ...prev, email: e.target.value }))}
+                className="bg-slate-900 border-slate-600 mt-1"
+                placeholder="email@exemplo.com"
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-slate-300">Categoria</Label>
+                <Input
+                  value={newMember.category}
+                  onChange={e => setNewMember(prev => ({ ...prev, category: e.target.value }))}
+                  className="bg-slate-900 border-slate-600 mt-1"
+                  placeholder="Ex: Premium, Básico..."
+                />
+              </div>
+              <div>
+                <Label className="text-slate-300">Status</Label>
+                <Select 
+                  value={newMember.status} 
+                  onValueChange={v => setNewMember(prev => ({ ...prev, status: v }))}
+                >
+                  <SelectTrigger className="bg-slate-900 border-slate-600 mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-600">
+                    <SelectItem value="active">Ativo</SelectItem>
+                    <SelectItem value="inactive">Inativo</SelectItem>
+                    <SelectItem value="pending">Pendente</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <div className="flex gap-3 pt-4">
+              <Button 
+                onClick={handleAddMember}
+                disabled={loading || !newMember.name || !newMember.phone}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700"
+              >
+                {loading ? (
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Plus className="w-4 h-4 mr-2" />
+                )}
+                Adicionar Membro
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={() => setShowAddMember(false)}
+                className="border-slate-600"
+              >
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Main Content */}
       <div className="container mx-auto px-4 py-6">
@@ -346,7 +750,7 @@ export default function Dashboard() {
                   </Button>
                   <Button 
                     className="w-full justify-start bg-purple-600 hover:bg-purple-700"
-                    onClick={() => setActiveTab('members')}
+                    onClick={() => setShowAddMember(true)}
                   >
                     <Plus className="w-4 h-4 mr-2" />
                     Adicionar Membros
@@ -406,7 +810,7 @@ export default function Dashboard() {
                     <span className="text-sm text-slate-300">IA Ativa</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${process.env.NEXT_PUBLIC_WHATSAPP_TOKEN ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                    <div className="w-2 h-2 rounded-full bg-green-500" />
                     <span className="text-sm text-slate-300">WhatsApp API</span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -450,6 +854,10 @@ export default function Dashboard() {
                   <CardTitle className="text-white flex items-center gap-2">
                     <MessageSquare className="w-5 h-5" />
                     Teste do Bot
+                    <Badge variant="outline" className="ml-auto border-emerald-500 text-emerald-400">
+                      <Sparkles className="w-3 h-3 mr-1" />
+                      IA Ativa
+                    </Badge>
                   </CardTitle>
                   <CardDescription>
                     Envie mensagens para testar as respostas do bot
@@ -461,6 +869,7 @@ export default function Dashboard() {
                       <div className="flex flex-col items-center justify-center h-full text-slate-500">
                         <Bot className="w-12 h-12 mb-2 opacity-50" />
                         <p>Envie uma mensagem para testar o bot</p>
+                        <p className="text-sm mt-2">O bot usa IA para responder de forma inteligente</p>
                       </div>
                     ) : (
                       <div className="space-y-4">
@@ -494,10 +903,11 @@ export default function Dashboard() {
                       onChange={e => setInputMessage(e.target.value)}
                       onKeyPress={e => e.key === 'Enter' && sendTestMessage()}
                       className="bg-slate-900 border-slate-600 text-white"
+                      disabled={loading}
                     />
                     <Button 
                       onClick={sendTestMessage}
-                      disabled={loading}
+                      disabled={loading || !inputMessage.trim()}
                       className="bg-emerald-600 hover:bg-emerald-700"
                     >
                       {loading ? (
@@ -572,7 +982,10 @@ export default function Dashboard() {
                     Gerencie os contatos do seu sistema
                   </CardDescription>
                 </div>
-                <Button className="bg-emerald-600 hover:bg-emerald-700">
+                <Button 
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                  onClick={() => setShowAddMember(true)}
+                >
                   <Plus className="w-4 h-4 mr-2" />
                   Novo Membro
                 </Button>
@@ -594,7 +1007,14 @@ export default function Dashboard() {
                   <div className="text-center py-12 text-slate-500">
                     <Users className="w-12 h-12 mx-auto mb-2 opacity-50" />
                     <p>Nenhum membro cadastrado</p>
-                    <p className="text-sm">Adicione membros para começar</p>
+                    <p className="text-sm">Clique em "Novo Membro" para adicionar</p>
+                    <Button 
+                      className="mt-4 bg-emerald-600 hover:bg-emerald-700"
+                      onClick={() => setShowAddMember(true)}
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Adicionar Primeiro Membro
+                    </Button>
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -615,6 +1035,7 @@ export default function Dashboard() {
                             <div>
                               <p className="text-white font-medium">{member.name}</p>
                               <p className="text-xs text-slate-500">{member.phone}</p>
+                              {member.email && <p className="text-xs text-slate-500">{member.email}</p>}
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
@@ -697,7 +1118,10 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card className="bg-slate-800/50 border-slate-700">
                 <CardHeader>
-                  <CardTitle className="text-white">Configurações do Bot</CardTitle>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Bot className="w-5 h-5 text-emerald-500" />
+                    Configurações do Bot
+                  </CardTitle>
                   <CardDescription>Personalize o comportamento do bot</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -717,7 +1141,26 @@ export default function Dashboard() {
                       onChange={e => setWelcomeMessage(e.target.value)}
                     />
                   </div>
-                  <Button className="w-full bg-emerald-600 hover:bg-emerald-700">
+                  <div>
+                    <label className="text-sm text-slate-400 mb-2 block">Nicho</label>
+                    <Select value={selectedNiche} onValueChange={setSelectedNiche}>
+                      <SelectTrigger className="bg-slate-900 border-slate-600">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-slate-800 border-slate-600">
+                        {niches.map(n => (
+                          <SelectItem key={n.id} value={n.id}>
+                            {n.icon} {n.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button 
+                    onClick={handleSaveConfig}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    <Save className="w-4 h-4 mr-2" />
                     Salvar Configurações
                   </Button>
                 </CardContent>
@@ -725,7 +1168,10 @@ export default function Dashboard() {
 
               <Card className="bg-slate-800/50 border-slate-700">
                 <CardHeader>
-                  <CardTitle className="text-white">Credenciais Necessárias</CardTitle>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-blue-500" />
+                    Credenciais Necessárias
+                  </CardTitle>
                   <CardDescription>Configure suas credenciais no arquivo .env</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -736,34 +1182,38 @@ export default function Dashboard() {
                         <p className="text-xs text-slate-500">WHATSAPP_TOKEN</p>
                       </div>
                       <Badge variant="outline" className="border-yellow-500 text-yellow-500">
-                        Pendente
+                        Configurar
                       </Badge>
                     </div>
                     
                     <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50">
                       <div>
                         <p className="text-white font-medium">Phone Number ID</p>
-                        <p className="text-xs text-slate-500">WHATSAPP_PHONE_NUMBER_ID</p>
+                        <p className="text-xs text-slate-500">WHATSAPP_PHONE_ID</p>
                       </div>
                       <Badge variant="outline" className="border-yellow-500 text-yellow-500">
-                        Pendente
+                        Configurar
                       </Badge>
                     </div>
                     
                     <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50">
                       <div>
-                        <p className="text-white font-medium">OpenAI API Key</p>
-                        <p className="text-xs text-slate-500">OPENAI_API_KEY</p>
+                        <p className="text-white font-medium">Banco de Dados</p>
+                        <p className="text-xs text-slate-500">DATABASE_URL</p>
                       </div>
-                      <Badge variant="outline" className="border-yellow-500 text-yellow-500">
-                        Pendente
+                      <Badge variant="outline" className="border-green-500 text-green-500">
+                        Conectado
                       </Badge>
                     </div>
                   </div>
                   
-                  <Button variant="outline" className="w-full border-slate-600">
-                    <ExternalLink className="w-4 h-4 mr-2" />
-                    Ver Documentação
+                  <Button 
+                    variant="outline" 
+                    className="w-full border-slate-600"
+                    onClick={() => setShowSettings(true)}
+                  >
+                    <Settings className="w-4 h-4 mr-2" />
+                    Configurações Avançadas
                   </Button>
                 </CardContent>
               </Card>

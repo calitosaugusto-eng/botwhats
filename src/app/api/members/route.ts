@@ -5,33 +5,51 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 
+// Garantir que o cliente existe
+async function ensureClient(clientId: string) {
+  let client = await prisma.client.findUnique({
+    where: { id: clientId }
+  })
+
+  if (!client) {
+    client = await prisma.client.create({
+      data: {
+        id: clientId,
+        name: 'Cliente Padrão',
+        slug: clientId,
+        niche: 'sindicato',
+        plan: 'basic'
+      }
+    })
+  }
+
+  return client
+}
+
 // Listar membros
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
-    const clientId = searchParams.get('clientId')
+    const clientId = searchParams.get('clientId') || 'default'
     const status = searchParams.get('status')
     const search = searchParams.get('search')
 
-    const where: Record<string, unknown> = {}
+    // Garantir que o cliente existe
+    await ensureClient(clientId)
+
+    const where: Record<string, unknown> = { clientId }
     
-    if (clientId) where.clientId = clientId
     if (status) where.status = status
     if (search) {
       where.OR = [
-        { name: { contains: search } },
+        { name: { contains: search, mode: 'insensitive' } },
         { phone: { contains: search } },
-        { email: { contains: search } }
+        { email: { contains: search, mode: 'insensitive' } }
       ]
     }
 
     const members = await prisma.member.findMany({
       where,
-      include: {
-        _count: {
-          select: { conversations: true }
-        }
-      },
       orderBy: { createdAt: 'desc' },
       take: 100
     })
@@ -47,15 +65,18 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { clientId, name, phone, email, cpf, membershipId, category, notes } = body
+    const { clientId = 'default', name, phone, email, cpf, membershipId, category, notes, status = 'active' } = body
 
-    if (!clientId || !name || !phone) {
-      return NextResponse.json({ success: false, error: 'clientId, name e phone são obrigatórios' }, { status: 400 })
+    if (!name || !phone) {
+      return NextResponse.json({ success: false, error: 'Nome e telefone são obrigatórios' }, { status: 400 })
     }
 
+    // Garantir que o cliente existe
+    await ensureClient(clientId)
+
     // Verificar se já existe
-    const existing = await prisma.member.findUnique({
-      where: { clientId_phone: { clientId, phone } }
+    const existing = await prisma.member.findFirst({
+      where: { clientId, phone }
     })
 
     if (existing) {
@@ -72,7 +93,7 @@ export async function POST(request: NextRequest) {
         membershipId,
         category,
         notes,
-        status: 'active',
+        status,
         joinDate: new Date()
       }
     })
@@ -80,7 +101,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, member })
   } catch (error) {
     console.error('Erro ao criar membro:', error)
-    return NextResponse.json({ success: false, error: 'Erro ao criar membro' }, { status: 500 })
+    return NextResponse.json({ success: false, error: 'Erro ao criar membro: ' + (error instanceof Error ? error.message : 'Erro desconhecido') }, { status: 500 })
   }
 }
 

@@ -19,10 +19,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Garantir que existe um cliente padrão
+    let client = await prisma.client.findUnique({
+      where: { id: clientId || 'default' }
+    })
+
+    if (!client) {
+      // Criar cliente padrão se não existir
+      client = await prisma.client.create({
+        data: {
+          id: clientId || 'default',
+          name: 'Cliente Padrão',
+          slug: 'default',
+          niche: niche,
+          plan: 'basic'
+        }
+      })
+    }
+
     // Buscar ou criar conversa de teste
     let conversation = await prisma.conversation.findFirst({
       where: {
-        clientId: clientId || 'test',
+        clientId: client.id,
         phone: 'test',
         status: 'active'
       }
@@ -31,7 +49,7 @@ export async function POST(request: NextRequest) {
     if (!conversation) {
       conversation = await prisma.conversation.create({
         data: {
-          clientId: clientId || 'test',
+          clientId: client.id,
           phone: 'test',
           status: 'active'
         }
@@ -41,7 +59,7 @@ export async function POST(request: NextRequest) {
     // Salvar mensagem do usuário
     await prisma.message.create({
       data: {
-        clientId: clientId || 'test',
+        clientId: client.id,
         conversationId: conversation.id,
         direction: 'inbound',
         type: 'text',
@@ -54,7 +72,7 @@ export async function POST(request: NextRequest) {
     // Processar com IA
     const response = await processWithAI({
       message,
-      clientId: clientId || 'test',
+      clientId: client.id,
       conversationId: conversation.id,
       member: null,
       niche
@@ -63,7 +81,7 @@ export async function POST(request: NextRequest) {
     // Salvar resposta do bot
     await prisma.message.create({
       data: {
-        clientId: clientId || 'test',
+        clientId: client.id,
         conversationId: conversation.id,
         direction: 'outbound',
         type: 'text',
@@ -90,7 +108,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Erro no chat:', error)
     return NextResponse.json(
-      { success: false, error: 'Erro ao processar mensagem' },
+      { success: false, error: 'Erro ao processar mensagem: ' + (error instanceof Error ? error.message : 'Erro desconhecido') },
       { status: 500 }
     )
   }
