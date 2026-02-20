@@ -1,0 +1,10 @@
+{
+  "buildCommand": "npx prisma generate && next build",
+  "devCommand": "next dev",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "regions": ["gru1"],
+  "env": {
+    "DATABASE_URL": "file:./db/custom.db"
+  }
+}
